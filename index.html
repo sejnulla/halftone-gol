@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Halftone — Game of Life</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Fraunces:opsz,wght@9..144,300;9..144,500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --panel: rgba(20, 20, 22, 0.72);
+    --panel-border: rgba(255, 255, 255, 0.06);
+    --panel-hover: rgba(255, 255, 255, 0.04);
+    --ink: #e8e8ea;
+    --ink-dim: #8a8a92;
+    --ink-faint: #4a4a52;
+    --accent: #d9ff3f;
+    --track: rgba(255, 255, 255, 0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: var(--bg); color: var(--ink);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .topbar {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    z-index: 10;
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 18px;
+    background: var(--panel);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    color: var(--ink-dim);
+    white-space: nowrap;
+  }
+  .topbar .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px var(--accent);
+    flex-shrink: 0;
+  }
+  .topbar strong { color: var(--ink); font-weight: 500; }
+
+  .panel {
+    position: fixed; top: 18px; right: 18px; bottom: 18px;
+    width: 296px;
+    background: var(--panel);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--panel-border);
+    border-radius: 22px;
+    padding: 18px;
+    overflow-y: auto;
+    z-index: 10;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ink-faint) transparent;
+  }
+  .panel::-webkit-scrollbar { width: 6px; }
+  .panel::-webkit-scrollbar-thumb { background: var(--ink-faint); border-radius: 3px; }
+
+  .panel h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 18px 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel h2:first-child { margin-top: 4px; }
+  .panel h2 .badge {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--ink-faint);
+  }
+
+  .ctrl {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .ctrl label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .ctrl .val {
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    background: var(--track);
+    padding: 2px 8px;
+    border-radius: 4px;
+    min-width: 44px;
+    text-align: right;
+  }
+
+  input[type=range] {
+    grid-column: 1 / -1;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--track);
+    border-radius: 2px;
+    outline: none;
+    margin: 4px 0 0;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--ink);
+    cursor: ew-resize;
+    box-shadow: 0 0 0 1px var(--bg);
+    transition: transform 0.12s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  input[type=range]::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--ink); cursor: ew-resize; border: none;
+  }
+
+  .seg {
+    grid-column: 1 / -1;
+    display: flex;
+    background: var(--track);
+    border-radius: 6px;
+    padding: 2px;
+    margin-top: 4px;
+  }
+  .seg button {
+    flex: 1;
+    appearance: none; background: none; border: none;
+    padding: 6px 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .seg button:hover { color: var(--ink); }
+  .seg button.active { background: var(--ink); color: var(--bg); }
+
+  .color-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .color-row label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .swatch-wrap {
+    position: relative;
+    width: 56px; height: 22px;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--panel-border);
+  }
+  input[type=color] {
+    position: absolute; inset: -2px;
+    width: calc(100% + 4px); height: calc(100% + 4px);
+    border: none; cursor: pointer; padding: 0;
+    background: none;
+  }
+
+  .toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%;
+    background: var(--track);
+    border: none;
+    color: var(--ink);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    margin-bottom: 8px;
+    transition: background 0.15s;
+  }
+  .toggle:hover { background: var(--panel-hover); }
+  .toggle .pill {
+    width: 24px; height: 13px;
+    background: var(--ink-faint);
+    border-radius: 999px;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle .pill::after {
+    content: '';
+    position: absolute; top: 2px; left: 2px;
+    width: 9px; height: 9px;
+    background: var(--bg);
+    border-radius: 50%;
+    transition: left 0.2s;
+  }
+  .toggle.on .pill { background: var(--accent); }
+  .toggle.on .pill::after { left: 13px; }
+
+  .action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .action-btn {
+    appearance: none;
+    border: 1px solid var(--panel-border);
+    background: var(--track);
+    color: var(--ink-dim);
+    padding: 9px 4px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .action-btn:hover { background: var(--panel-hover); color: var(--ink); border-color: var(--ink-faint); }
+
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    background: var(--track);
+    border: 1px solid var(--panel-border);
+    color: var(--ink-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    padding: 8px 28px 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><polygon points='0,0 8,0 4,5' fill='%234a4a52'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    margin-bottom: 8px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  select:hover { border-color: var(--ink-faint); color: var(--ink); }
+  select option { background: #18181b; color: var(--ink); }
+
+  .preset-row {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 8px;
+  }
+  .preset-row select { flex: 1; margin-bottom: 0; }
+  .preset-row .action-btn { flex-shrink: 0; white-space: nowrap; }
+
+  .pal-swatches {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+  }
+  .pal-btn {
+    border: 1.5px solid transparent;
+    border-radius: 6px;
+    padding: 9px 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.9);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.55);
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .pal-btn.active {
+    border-color: rgba(255,255,255,0.75);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.2);
+  }
+
+  /* Preset name input */
+  .preset-input {
+    flex: 1; min-width: 0;
+    background: var(--track);
+    border: 1px solid var(--panel-border);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    padding: 8px 10px;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .preset-input::placeholder { color: var(--ink-faint); }
+  .preset-input:focus { border-color: var(--ink-faint); }
+  .preset-input.error { border-color: rgba(255, 80, 80, 0.6); }
+
+  /* Paint cursor */
+  body.painting { cursor: crosshair; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+
+<div class="topbar">
+  <span class="dot"></span>
+  <span><strong>Halftone</strong> &nbsp;·&nbsp; game of life visual tool</span>
+</div>
+
+<aside class="panel">
+
+  <!-- PRESETS -->
+  <h2>Presets <span class="badge">config</span></h2>
+  <div class="preset-row" style="margin-bottom:6px;">
+    <input type="text" id="preset-name" class="preset-input" placeholder="preset name…" autocomplete="off" spellcheck="false">
+    <button class="action-btn" id="btn-save-preset">Save</button>
+  </div>
+  <div class="preset-row">
+    <select id="preset-select"><option value="">— select preset —</option></select>
+    <button class="action-btn" id="btn-del-preset">Del</button>
+  </div>
+  <button class="action-btn" style="width:100%;margin-bottom:10px;" id="btn-reset-preset">Reset to defaults</button>
+
+  <!-- GAME OF LIFE -->
+  <h2>Game of Life <span class="badge">simulation</span></h2>
+
+  <div class="ctrl">
+    <label>Sim Res</label><span class="val" id="v-simres">200</span>
+    <input type="range" id="simres" min="20" max="500" step="10" value="200">
+  </div>
+
+  <div class="ctrl">
+    <label>Speed</label><span class="val" id="v-speed">1</span>
+    <input type="range" id="speed" min="0.05" max="20" step="0.05" value="1">
+  </div>
+
+  <div class="ctrl">
+    <label>Trail</label><span class="val" id="v-trail">0.00</span>
+    <input type="range" id="trail" min="0" max="0.99" step="0.01" value="0">
+  </div>
+
+  <div class="ctrl">
+    <label>Kill static</label><span class="val" id="v-killstatic">0.00</span>
+    <input type="range" id="killstatic" min="0" max="1" step="0.01" value="0">
+  </div>
+
+  <div class="ctrl">
+    <label>Fill %</label><span class="val" id="v-fill">35%</span>
+    <input type="range" id="fill" min="5" max="80" step="5" value="35">
+  </div>
+
+  <div class="action-row">
+    <button class="action-btn" id="btn-randomize">Randomize</button>
+    <button class="action-btn" id="btn-clear">Clear</button>
+  </div>
+
+  <select id="pattern-select">
+    <option value="">— stamp a pattern —</option>
+    <optgroup label="Still lifes">
+      <option value="block">Block</option>
+      <option value="beehive">Beehive</option>
+      <option value="loaf">Loaf</option>
+      <option value="boat">Boat</option>
+    </optgroup>
+    <optgroup label="Oscillators">
+      <option value="blinker">Blinker (p2)</option>
+      <option value="toad">Toad (p2)</option>
+      <option value="beacon">Beacon (p2)</option>
+      <option value="pulsar">Pulsar (p3)</option>
+      <option value="pentadecathlon">Pentadecathlon (p15)</option>
+    </optgroup>
+    <optgroup label="Spaceships">
+      <option value="glider">Glider</option>
+      <option value="lwss">LWSS</option>
+      <option value="mwss">MWSS</option>
+    </optgroup>
+    <optgroup label="Guns">
+      <option value="gospergun">Gosper Glider Gun</option>
+    </optgroup>
+    <optgroup label="Methuselahs">
+      <option value="rpentomino">R-pentomino</option>
+      <option value="acorn">Acorn</option>
+      <option value="diehard">Diehard</option>
+      <option value="bheptomino">B-heptomino</option>
+    </optgroup>
+  </select>
+
+  <button class="toggle on" id="toggle-wrap">
+    Wrap edges <span class="pill"></span>
+  </button>
+
+  <button class="toggle on" id="toggle-running">
+    Running <span class="pill"></span>
+  </button>
+
+  <!-- PAINT -->
+  <h2>Paint <span class="badge">draw cells</span></h2>
+
+  <button class="toggle" id="toggle-paint">
+    Paint alive <span class="pill"></span>
+  </button>
+
+  <div class="ctrl">
+    <label>Brush size</label><span class="val" id="v-brushsize">3</span>
+    <input type="range" id="brushsize" min="1" max="12" step="1" value="3">
+  </div>
+
+  <!-- GRID -->
+  <h2>Grid <span class="badge">structure</span></h2>
+
+  <div class="ctrl">
+    <label>Mode</label>
+    <div class="seg" data-control="mode">
+      <button data-val="dots" class="active">Cells</button>
+      <button data-val="cols">Cols</button>
+      <button data-val="rows">Rows</button>
+    </div>
+  </div>
+
+  <div class="ctrl">
+    <label>Density</label><span class="val" id="v-density">37</span>
+    <input type="range" id="density" min="20" max="400" step="1" value="37">
+  </div>
+
+  <div class="ctrl">
+    <label>Cell Width</label><span class="val" id="v-cellw">0.80</span>
+    <input type="range" id="cellw" min="0.3" max="2.5" step="0.01" value="0.8">
+  </div>
+
+  <div class="ctrl">
+    <label>Cell Height</label><span class="val" id="v-cellh">0.30</span>
+    <input type="range" id="cellh" min="0.3" max="2.5" step="0.01" value="0.3">
+  </div>
+
+  <div class="ctrl">
+    <label>Roundness</label><span class="val" id="v-round">1.00</span>
+    <input type="range" id="round" min="0" max="1" step="0.01" value="1.0">
+  </div>
+
+  <div class="ctrl">
+    <label>Rotation</label><span class="val" id="v-rot">0°</span>
+    <input type="range" id="rot" min="-45" max="45" step="1" value="0">
+  </div>
+
+  <div class="ctrl">
+    <label>Spacing</label><span class="val" id="v-spacing">0.08</span>
+    <input type="range" id="spacing" min="0" max="0.9" step="0.01" value="0.08">
+  </div>
+
+  <!-- BRIGHTNESS -->
+  <h2>Brightness <span class="badge">tone curve</span></h2>
+
+  <div class="ctrl">
+    <label>Low</label><span class="val" id="v-low">0.01</span>
+    <input type="range" id="low" min="0" max="0.5" step="0.01" value="0.01">
+  </div>
+
+  <div class="ctrl">
+    <label>Mid</label><span class="val" id="v-mid">0.49</span>
+    <input type="range" id="mid" min="0.1" max="0.9" step="0.01" value="0.49">
+  </div>
+
+  <div class="ctrl">
+    <label>High</label><span class="val" id="v-high">1.00</span>
+    <input type="range" id="high" min="0.5" max="1" step="0.01" value="1.0">
+  </div>
+
+  <!-- COLOR -->
+  <h2>Color <span class="badge">fill</span></h2>
+
+  <div class="ctrl">
+    <div class="seg" data-control="colormode" style="grid-column: 1 / -1;">
+      <button data-val="solid">Solid</button>
+      <button data-val="gradient">Grad</button>
+      <button data-val="palrandom">Rand</button>
+      <button data-val="palluma">Luma</button>
+      <button data-val="palpick" class="active">Pick</button>
+    </div>
+  </div>
+
+  <div id="solid-controls" style="display:none;">
+    <div class="color-row">
+      <label>Fill</label>
+      <div class="swatch-wrap"><input type="color" id="solid-color" value="#a8ff0a"></div>
+    </div>
+  </div>
+
+  <div id="palette-pick-controls" style="margin-bottom:8px;">
+    <div style="font-size:10px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:6px;">Palette</div>
+    <div class="pal-swatches" data-control="palPick">
+      <button class="pal-btn" data-val="0" style="background:linear-gradient(135deg,#645139,#5ca6cd)">Surface</button>
+      <button class="pal-btn active" data-val="1" style="background:linear-gradient(135deg,#e44d43,#f9cf80)">Sunset</button>
+      <button class="pal-btn" data-val="2" style="background:linear-gradient(135deg,#4e5d02,#a0b80a)">Forest</button>
+      <button class="pal-btn" data-val="3" style="background:linear-gradient(135deg,#cf2f1e,#e18ea3)">Bloom</button>
+    </div>
+  </div>
+
+  <div id="gradient-controls" style="display:none;">
+    <div class="color-row">
+      <label>Low</label>
+      <div class="swatch-wrap"><input type="color" id="grad-low" value="#1a3300"></div>
+    </div>
+    <div class="color-row">
+      <label>Mid</label>
+      <div class="swatch-wrap"><input type="color" id="grad-mid" value="#86d900"></div>
+    </div>
+    <div class="color-row">
+      <label>High</label>
+      <div class="swatch-wrap"><input type="color" id="grad-high" value="#eeffba"></div>
+    </div>
+  </div>
+
+  <div class="color-row" style="margin-top:6px;">
+    <label>Background</label>
+    <div class="swatch-wrap"><input type="color" id="bg-color" value="#000000"></div>
+  </div>
+
+  <!-- DISPLAY -->
+  <h2>Display <span class="badge">render</span></h2>
+
+  <button class="toggle" id="toggle-size-brt">
+    Size ← Brightness <span class="pill"></span>
+  </button>
+
+</aside>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ============================================================
+// PATTERN LIBRARY
+// Encoded as rows of '.' (dead) and 'O' (alive), centered
+// ============================================================
+function parsePat(rows) {
+  const maxW = Math.max(...rows.map(r => r.length));
+  const cx = Math.floor(maxW / 2);
+  const cy = Math.floor(rows.length / 2);
+  const out = [];
+  for (let y = 0; y < rows.length; y++)
+    for (let x = 0; x < rows[y].length; x++)
+      if (rows[y][x] === 'O') out.push([x - cx, y - cy]);
+  return out;
+}
+
+const PATTERNS = {
+  // Still lifes
+  block:       parsePat(['OO','OO']),
+  beehive:     parsePat(['.OO.','O..O','.OO.']),
+  loaf:        parsePat(['.OO.','O..O','.O.O','..O.']),
+  boat:        parsePat(['OO.','O.O','.O.']),
+  // Oscillators
+  blinker:     parsePat(['OOO']),
+  toad:        parsePat(['.OOO','OOO.']),
+  beacon:      parsePat(['OO..','OO..','..OO','..OO']),
+  pulsar:      parsePat([
+    '..OOO...OOO..',
+    '.............',
+    'O....O.O....O',
+    'O....O.O....O',
+    'O....O.O....O',
+    '..OOO...OOO..',
+    '.............',
+    '..OOO...OOO..',
+    'O....O.O....O',
+    'O....O.O....O',
+    'O....O.O....O',
+    '.............',
+    '..OOO...OOO..',
+  ]),
+  pentadecathlon: parsePat([
+    '..O....O..',
+    'OO.OOOO.OO',
+    '..O....O..',
+  ]),
+  // Spaceships
+  glider:      parsePat(['.O.','..O','OOO']),
+  lwss:        parsePat(['.O..O','O....','O...O','OOOO.']),
+  mwss:        parsePat([
+    '..O..',
+    'O...O',
+    '.....O',
+    'O....O',
+    '.OOOOO',
+  ]),
+  // Guns
+  gospergun:   parsePat([
+    '........................O...........',
+    '......................O.O...........',
+    '............OO......OO............OO',
+    '...........O...O....OO............OO',
+    'OO........O.....O...OO..............',
+    'OO........O...O.OO....O.O...........',
+    '..........O.....O.......O...........',
+    '...........O...O....................',
+    '............OO......................',
+  ]),
+  // Methuselahs
+  rpentomino:  parsePat(['.OO','OO.','.O.']),
+  acorn:       parsePat(['.O.....','...O...','OO..OOO']),
+  diehard:     parsePat(['......O.','OO......','.O...OOO']),
+  bheptomino:  parsePat(['OO.','O..','..O','.OO']),
+};
+
+// ============================================================
+// STATE
+// ============================================================
+const DEFAULTS = {
+  simRes: 200, speed: 1, trail: 0, fill: 35, killStatic: 0,
+  wrap: true, running: true, paintMode: false, brushSize: 3,
+  mode: 0, density: 37, cellW: 0.8, cellH: 0.3, round: 1.0,
+  rot: 0, spacing: 0.08,
+  low: 0.01, mid: 0.49, high: 1.0,
+  colorMode: 4,
+  solid:  [0.66, 1.0, 0.04],
+  gLow:   [0.10, 0.20, 0.0],
+  gMid:   [0.53, 0.85, 0.0],
+  gHigh:  [0.93, 1.0, 0.73],
+  bg:     [0.0, 0.0, 0.0],
+  palPick: 1,
+  sizeFromBrt: false,
+};
+const state = JSON.parse(JSON.stringify(DEFAULTS));
+
+// ============================================================
+// RENDERER
+// ============================================================
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const quadGeo = new THREE.PlaneGeometry(2, 2);
+const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+// ============================================================
+// SEED MATERIAL — random fill or clear
+// ============================================================
+const seedMat = new THREE.ShaderMaterial({
+  uniforms: { uSeed: {value:0}, uFill: {value:0.35}, uClear: {value:0} },
+  vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position,1.);}`,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform float uSeed, uFill;
+    uniform int uClear;
+    float hash(vec2 p){p=fract(p*vec2(234.34,435.345)+uSeed);p+=dot(p,p+34.23);return fract(p.x*p.y);}
+    void main(){
+      if(uClear==1){gl_FragColor=vec4(0,0,0,1);return;}
+      float v=hash(vUv)<uFill?1.:0.;
+      // R=display, G=alive, B=stasis=0
+      gl_FragColor=vec4(v,v,0.,1.);
+    }`,
+});
+
+// ============================================================
+// GOL SIMULATION MATERIAL
+// R = display value (with optional trail decay)
+// G = binary alive state (0 or 1) — used for neighbour counting
+// B = stasis counter (0–1, increments 1/255 per stable frame)
+// ============================================================
+const golMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uState:      {value:null},
+    uResolution: {value:new THREE.Vector2(200,200)},
+    uTrail:      {value:0},
+    uWrap:       {value:1},
+    uKillStatic: {value:0},
+    uFrameSeed:  {value:0},
+  },
+  vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position,1.);}`,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D uState;
+    uniform vec2 uResolution;
+    uniform float uTrail, uKillStatic, uFrameSeed;
+    uniform int uWrap;
+
+    vec2 nb(vec2 uv, vec2 off){
+      vec2 n=uv+off/uResolution;
+      return uWrap==1?fract(n):clamp(n,0.,1.);
+    }
+    float hash(vec2 p){
+      p=fract(p*vec2(127.1,311.7)+uFrameSeed);
+      return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);
+    }
+
+    void main(){
+      vec4 cur=texture2D(uState,vUv);
+      float disp=cur.r, alive=cur.g, stasis=cur.b;
+
+      float n=0.;
+      for(int dy=-1;dy<=1;dy++)
+        for(int dx=-1;dx<=1;dx++){
+          if(dx==0&&dy==0)continue;
+          if(texture2D(uState,nb(vUv,vec2(float(dx),float(dy)))).g>0.5)n+=1.;
+        }
+
+      bool wasAlive=alive>0.5;
+      bool nextAlive=wasAlive?(n>=2.&&n<=3.):(n==3.);
+      float nextAliveVal=nextAlive?1.:0.;
+      float nextDisp=nextAlive?1.:disp*uTrail;
+
+      // Stasis: resets on state change, else increments
+      bool changed=nextAlive!=wasAlive;
+      float nextStasis=changed?0.:min(stasis+1./255.,1.);
+
+      // Kill cells that have been static too long
+      if(uKillStatic>0.&&nextAlive){
+        float threshold=1.-uKillStatic;
+        if(nextStasis>=threshold&&hash(vUv)<uKillStatic*0.3){
+          nextAliveVal=0.; nextDisp=disp*uTrail; nextStasis=0.;
+        }
+      }
+
+      gl_FragColor=vec4(nextDisp,nextAliveVal,nextStasis,1.);
+    }`,
+});
+
+// ============================================================
+// OVERLAY MATERIAL — paint brush OR pattern stamp
+// mode 0 = paint circle at mouse; mode 1 = OR-blend stamp texture
+// ============================================================
+const overlayMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uState:       {value:null},
+    uStamp:       {value:null},
+    uMode:        {value:0},          // 0=paint, 1=stamp
+    uMousePx:     {value:new THREE.Vector2(-9999,-9999)},
+    uSimSize:     {value:new THREE.Vector2(200,200)},
+    uScreenSize:  {value:new THREE.Vector2(1920,1080)},
+    uBrushRadius: {value:3},          // in screen pixels
+  },
+  vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position,1.);}`,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D uState, uStamp;
+    uniform int uMode;
+    uniform vec2 uMousePx, uSimSize, uScreenSize;
+    uniform float uBrushRadius;
+
+    void main(){
+      vec4 cur=texture2D(uState,vUv);
+      if(uMode==0){
+        // Paint: distance in screen-pixel space for round brush
+        vec2 scaledDelta=(gl_FragCoord.xy-uMousePx)*(uScreenSize/uSimSize);
+        if(length(scaledDelta)<uBrushRadius){
+          gl_FragColor=vec4(1.,1.,0.,1.); return;
+        }
+        gl_FragColor=cur;
+      } else {
+        // Stamp: OR current state with stamp texture
+        vec4 stamp=texture2D(uStamp,vUv);
+        gl_FragColor=vec4(max(cur.r,stamp.r),max(cur.g,stamp.g),cur.b,1.);
+      }
+    }`,
+});
+
+// ============================================================
+// HALFTONE DISPLAY MATERIAL
+// ============================================================
+const halftoneMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTex:        {value:null},
+    uResolution: {value:new THREE.Vector2(1,1)},
+    uMode:       {value:0},
+    uDensity:    {value:37},
+    uCellW:      {value:0.8},
+    uCellH:      {value:0.3},
+    uRound:      {value:1},
+    uRot:        {value:0},
+    uLow:        {value:0.01},
+    uMid:        {value:0.49},
+    uHigh:       {value:1},
+    uSpacing:    {value:0.08},
+    uSizeFromBrt:{value:0},
+    uColorMode:  {value:4},
+    uSolid:      {value:new THREE.Vector3(0.66,1,0.04)},
+    uGLow:       {value:new THREE.Vector3(0.10,0.20,0)},
+    uGMid:       {value:new THREE.Vector3(0.53,0.85,0)},
+    uGHigh:      {value:new THREE.Vector3(0.93,1,0.73)},
+    uBg:         {value:new THREE.Vector3(0,0,0)},
+    uPal0A:{value:new THREE.Vector3(0.392,0.318,0.224)},
+    uPal0B:{value:new THREE.Vector3(0.361,0.651,0.804)},
+    uPal1A:{value:new THREE.Vector3(0.894,0.302,0.263)},
+    uPal1B:{value:new THREE.Vector3(0.976,0.812,0.502)},
+    uPal2A:{value:new THREE.Vector3(0.306,0.365,0.008)},
+    uPal2B:{value:new THREE.Vector3(0.627,0.722,0.039)},
+    uPal3A:{value:new THREE.Vector3(0.812,0.184,0.118)},
+    uPal3B:{value:new THREE.Vector3(0.882,0.557,0.639)},
+    uPalPick:{value:1},
+  },
+  vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position,1.);}`,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D uTex;
+    uniform vec2 uResolution;
+    uniform int uMode;
+    uniform float uDensity,uCellW,uCellH,uRound,uRot;
+    uniform float uLow,uMid,uHigh,uSpacing;
+    uniform int uSizeFromBrt,uColorMode;
+    uniform vec3 uSolid,uGLow,uGMid,uGHigh,uBg;
+    uniform vec3 uPal0A,uPal0B,uPal1A,uPal1B,uPal2A,uPal2B,uPal3A,uPal3B;
+    uniform int uPalPick;
+
+    float tone(float l){
+      l=clamp(l,0.,1.);
+      if(l<=uLow)return 0.; if(l>=uHigh)return 1.;
+      if(l<uMid)return(l-uLow)/max(uMid-uLow,1e-4)*0.5;
+      return 0.5+(l-uMid)/max(uHigh-uMid,1e-4)*0.5;
+    }
+    vec3 grad(float t){
+      t=clamp(t,0.,1.);
+      return t<0.5?mix(uGLow,uGMid,t*2.):mix(uGMid,uGHigh,(t-.5)*2.);
+    }
+    vec3 pal(int gi,float t){
+      t=clamp(t,0.,1.);
+      if(gi==0)return mix(uPal0A,uPal0B,t);
+      if(gi==1)return mix(uPal1A,uPal1B,t);
+      if(gi==2)return mix(uPal2A,uPal2B,t);
+      return mix(uPal3A,uPal3B,t);
+    }
+    float sdBox(vec2 p,vec2 h,float r){
+      r=min(r,min(h.x,h.y));
+      vec2 q=abs(p)-(h-r);
+      return length(max(q,0.))+min(max(q.x,q.y),0.)-r;
+    }
+
+    void main(){
+      vec2 pix=vUv*uResolution;
+      vec2 ctr=uResolution*.5;
+      vec2 p=pix-ctr;
+      float c=cos(uRot),s=sin(uRot);
+      p=mat2(c,-s,s,c)*p+ctr;
+
+      float base=min(uResolution.x,uResolution.y)/uDensity;
+      vec2 csz=vec2(base*uCellW,base*uCellH);
+      vec2 ci=floor(p/csz);
+      vec2 cc=(ci+.5)*csz;
+
+      vec2 qb=mat2(c,s,-s,c)*(cc-ctr);
+      vec2 suv=(qb+ctr)/uResolution;
+      vec3 bg=uBg;
+      if(suv.x<0.||suv.x>1.||suv.y<0.||suv.y>1.){gl_FragColor=vec4(bg,1.);return;}
+
+      float l=texture2D(uTex,suv).r;
+      float t=tone(l);
+      if(t<0.01){gl_FragColor=vec4(bg,1.);return;}
+
+      float ts=uSizeFromBrt==1?t:1.;
+      vec2 lc=p-cc;
+      float gap=1.-uSpacing;
+
+      float clt;
+      if(uMode==0){vec2 hF=csz*.5*gap*ts;clt=clamp(lc.y/max(hF.y,.001)*.5+.5,0.,1.);}
+      else if(uMode==1){clt=clamp(pix.y/uResolution.y,0.,1.);}
+      else{clt=clamp(pix.x/uResolution.x,0.,1.);}
+
+      float mask=0.;
+      if(uMode==0){
+        vec2 h=csz*.5*gap*ts; float r=uRound*min(h.x,h.y);
+        float d=sdBox(lc,h,r); float aa=max(fwidth(d),.5);
+        mask=1.-smoothstep(-aa,aa,d);
+      } else if(uMode==1){
+        float hw=csz.x*.5*gap*ts; float d=abs(lc.x)-hw;
+        float aa=max(fwidth(d),.5); mask=1.-smoothstep(-aa,aa,d);
+      } else {
+        float hh=csz.y*.5*gap*ts; float d=abs(lc.y)-hh;
+        float aa=max(fwidth(d),.5); mask=1.-smoothstep(-aa,aa,d);
+      }
+
+      vec3 fill;
+      if(uColorMode==0) fill=uSolid;
+      else if(uColorMode==1) fill=grad(t);
+      else if(uColorMode==2){
+        float h=fract(sin(dot(ci,vec2(127.1,311.7)))*43758.5453);
+        fill=pal(int(min(floor(h*4.),3.)),clt);
+      } else if(uColorMode==3){
+        fill=pal(int(min(floor(t*4.),3.)),clt);
+      } else {
+        fill=pal(uPalPick,t);
+      }
+      gl_FragColor=vec4(mix(bg,fill,mask),1.);
+    }`,
+});
+
+// ============================================================
+// PASSTHROUGH MATERIAL — copies a texture directly to a render target
+// Used by doStamp to write pattern data without a swap
+// ============================================================
+const passthroughMat = new THREE.ShaderMaterial({
+  uniforms: { uTex: {value:null} },
+  vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position,1.);}`,
+  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D uTex; void main(){gl_FragColor=texture2D(uTex,vUv);}`,
+});
+
+// ============================================================
+// SCENES & RENDER TARGETS
+// ============================================================
+const simScene = new THREE.Scene();
+const simMesh  = new THREE.Mesh(quadGeo, seedMat);
+simScene.add(simMesh);
+
+const htScene  = new THREE.Scene();
+htScene.add(new THREE.Mesh(quadGeo, halftoneMat));
+
+let rtA, rtB, rtCurrent, rtNext, simW, simH;
+
+function makeRT(w, h) {
+  return new THREE.WebGLRenderTarget(w, h, {
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+  });
+}
+
+function rebuildSim() {
+  if (rtA) { rtA.dispose(); rtB.dispose(); }
+  simW = state.simRes; simH = state.simRes;
+  rtA = makeRT(simW, simH); rtB = makeRT(simW, simH);
+  rtCurrent = rtA; rtNext = rtB;
+  golMat.uniforms.uResolution.value.set(simW, simH);
+  overlayMat.uniforms.uSimSize.value.set(simW, simH);
+  doSeed(false);
+}
+
+// ============================================================
+// SIMULATION OPS
+// ============================================================
+function doSeed(clear) {
+  seedMat.uniforms.uSeed.value  = Math.random() * 9999;
+  seedMat.uniforms.uFill.value  = state.fill / 100;
+  seedMat.uniforms.uClear.value = clear ? 1 : 0;
+  simMesh.material = seedMat;
+  renderer.setRenderTarget(rtCurrent);
+  renderer.render(simScene, quadCam);
+  renderer.setRenderTarget(null);
+}
+
+function stepGOL() {
+  golMat.uniforms.uState.value      = rtCurrent.texture;
+  golMat.uniforms.uTrail.value      = state.trail;
+  golMat.uniforms.uWrap.value       = state.wrap ? 1 : 0;
+  golMat.uniforms.uKillStatic.value = state.killStatic;
+  golMat.uniforms.uFrameSeed.value  = Math.random();
+  simMesh.material = golMat;
+  renderer.setRenderTarget(rtNext);
+  renderer.render(simScene, quadCam);
+  renderer.setRenderTarget(null);
+  const t = rtCurrent; rtCurrent = rtNext; rtNext = t;
+}
+
+function doPaint(px) {
+  const dpr = renderer.getPixelRatio();
+  const sw  = window.innerWidth * dpr;
+  const sh  = window.innerHeight * dpr;
+  overlayMat.uniforms.uState.value      = rtCurrent.texture;
+  overlayMat.uniforms.uMode.value       = 0;
+  overlayMat.uniforms.uMousePx.value.copy(px);
+  overlayMat.uniforms.uSimSize.value.set(simW, simH);
+  overlayMat.uniforms.uScreenSize.value.set(sw, sh);
+  // brush radius: brushSize cells → screen pixels (use height as reference)
+  overlayMat.uniforms.uBrushRadius.value = state.brushSize * (sh / simH);
+  simMesh.material = overlayMat;
+  renderer.setRenderTarget(rtNext);
+  renderer.render(simScene, quadCam);
+  renderer.setRenderTarget(null);
+  const t = rtCurrent; rtCurrent = rtNext; rtNext = t;
+}
+
+function doStamp(patternKey) {
+  const cells = PATTERNS[patternKey];
+  if (!cells || !cells.length) return;
+
+  // Build a full sim-size DataTexture: all dead (R=G=B=0, A=255), then set pattern cells alive
+  const data = new Uint8Array(simW * simH * 4);
+  for (let i = 3; i < data.length; i += 4) data[i] = 255; // A=255 everywhere
+
+  const cx = Math.floor(simW / 2);
+  const cy = Math.floor(simH / 2);
+  for (const [dx, dy] of cells) {
+    const x = cx + dx;
+    const y = cy - dy; // flip Y: parsePat row 0 = top of screen = high texture y
+    if (x < 0 || x >= simW || y < 0 || y >= simH) continue;
+    const i = (y * simW + x) * 4;
+    data[i] = data[i+1] = 255; // R=display=1, G=alive=1, B=stasis stays 0
+  }
+
+  const tex = new THREE.DataTexture(data, simW, simH, THREE.RGBAFormat);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+
+  // Write directly to rtCurrent (clear+replace) — no ping-pong swap needed
+  passthroughMat.uniforms.uTex.value = tex;
+  simMesh.material = passthroughMat;
+  renderer.setRenderTarget(rtCurrent);
+  renderer.render(simScene, quadCam);
+  renderer.setRenderTarget(null);
+  tex.dispose();
+}
+
+// ============================================================
+// RESIZE
+// ============================================================
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const dpr = renderer.getPixelRatio();
+  renderer.setSize(w, h, false);
+  halftoneMat.uniforms.uResolution.value.set(Math.floor(w * dpr), Math.floor(h * dpr));
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// PAINT — mouse tracking
+// ============================================================
+let mouseDown = false;
+const mouseGolPx = new THREE.Vector2(-9999, -9999);
+
+function toGolPx(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top) / rect.height;
+  return new THREE.Vector2(mx * simW, (1 - my) * simH);
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (!state.paintMode) return;
+  mouseDown = true;
+  mouseGolPx.copy(toGolPx(e));
+});
+canvas.addEventListener('mousemove', e => {
+  if (!state.paintMode || !mouseDown) return;
+  mouseGolPx.copy(toGolPx(e));
+});
+window.addEventListener('mouseup', () => { mouseDown = false; });
+canvas.addEventListener('mouseleave', () => { mouseDown = false; });
+
+// ============================================================
+// INIT & RENDER LOOP
+// ============================================================
+rebuildSim();
+
+let stepAccum = 0;
+
+function render() {
+  if (state.running) {
+    stepAccum += state.speed;
+    const steps = Math.floor(stepAccum);
+    stepAccum -= steps;
+    for (let i = 0; i < steps; i++) stepGOL();
+  } else {
+    stepAccum = 0; // reset when paused so it doesn't burst on resume
+  }
+  if (state.paintMode && mouseDown) doPaint(mouseGolPx);
+
+  halftoneMat.uniforms.uTex.value = rtCurrent.texture;
+  renderer.setRenderTarget(null);
+  renderer.render(htScene, quadCam);
+  requestAnimationFrame(render);
+}
+render();
+
+// ============================================================
+// SYNC HALFTONE UNIFORMS
+// ============================================================
+function syncUniforms() {
+  const u = halftoneMat.uniforms;
+  u.uMode.value        = state.mode;
+  u.uDensity.value     = state.density;
+  u.uCellW.value       = state.cellW;
+  u.uCellH.value       = state.cellH;
+  u.uRound.value       = state.round;
+  u.uRot.value         = state.rot * Math.PI / 180;
+  u.uSpacing.value     = state.spacing;
+  u.uSizeFromBrt.value = state.sizeFromBrt ? 1 : 0;
+  u.uLow.value         = state.low;
+  u.uMid.value         = state.mid;
+  u.uHigh.value        = state.high;
+  u.uColorMode.value   = state.colorMode;
+  u.uSolid.value.fromArray(state.solid);
+  u.uGLow.value.fromArray(state.gLow);
+  u.uGMid.value.fromArray(state.gMid);
+  u.uGHigh.value.fromArray(state.gHigh);
+  u.uBg.value.fromArray(state.bg);
+  u.uPalPick.value     = state.palPick;
+}
+
+// ============================================================
+// PRESET SYSTEM
+// ============================================================
+const PRESET_KEYS = [
+  'simRes','speed','trail','fill','killStatic','wrap','brushSize',
+  'mode','density','cellW','cellH','round','rot','spacing',
+  'low','mid','high','colorMode','solid','gLow','gMid','gHigh','bg','palPick','sizeFromBrt',
+];
+
+function loadPresetList() {
+  const presets = JSON.parse(localStorage.getItem('halftone-gol-presets') || '{}');
+  const sel = document.getElementById('preset-select');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— select preset —</option>';
+  Object.keys(presets).sort().forEach(n => {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n; sel.appendChild(o);
+  });
+  if (presets[cur]) sel.value = cur;
+  return presets;
+}
+
+function applyPreset(settings) {
+  PRESET_KEYS.forEach(k => {
+    if (settings[k] !== undefined) state[k] = JSON.parse(JSON.stringify(settings[k]));
+  });
+  applyStateToUI();
+  syncUniforms();
+}
+
+document.getElementById('preset-select').addEventListener('change', function() {
+  if (!this.value) return;
+  const presets = JSON.parse(localStorage.getItem('halftone-gol-presets') || '{}');
+  if (presets[this.value]) applyPreset(presets[this.value]);
+});
+
+document.getElementById('btn-save-preset').addEventListener('click', () => {
+  const input = document.getElementById('preset-name');
+  const n = input.value.trim();
+  if (!n) {
+    // Flash red border to signal required field
+    input.classList.add('error');
+    input.focus();
+    setTimeout(() => input.classList.remove('error'), 700);
+    return;
+  }
+  const presets = JSON.parse(localStorage.getItem('halftone-gol-presets') || '{}');
+  const snap = {};
+  PRESET_KEYS.forEach(k => { snap[k] = JSON.parse(JSON.stringify(state[k])); });
+  presets[n] = snap;
+  localStorage.setItem('halftone-gol-presets', JSON.stringify(presets));
+  loadPresetList();
+  document.getElementById('preset-select').value = n;
+  input.value = '';
+});
+
+document.getElementById('btn-del-preset').addEventListener('click', () => {
+  const sel = document.getElementById('preset-select');
+  if (!sel.value) return;
+  const presets = JSON.parse(localStorage.getItem('halftone-gol-presets') || '{}');
+  delete presets[sel.value];
+  localStorage.setItem('halftone-gol-presets', JSON.stringify(presets));
+  loadPresetList();
+});
+
+document.getElementById('btn-reset-preset').addEventListener('click', () => {
+  applyPreset(DEFAULTS);
+});
+
+loadPresetList();
+
+// ============================================================
+// APPLY STATE → UI  (used when loading presets)
+// ============================================================
+function rgbToHex(arr) {
+  return '#' + arr.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+}
+
+function applyStateToUI() {
+  function sr(id, val, vid, fmt) {
+    const el = document.getElementById(id); if (el) el.value = val;
+    const v  = document.getElementById(vid || 'v-' + id); if (v) v.textContent = fmt(val);
+  }
+  sr('simres',    state.simRes,     'v-simres',    v => v);
+  sr('speed',     state.speed,      'v-speed',     v => v < 1 ? parseFloat(v).toFixed(2) : parseFloat(v).toFixed(0));
+  sr('trail',     state.trail,      'v-trail',     v => parseFloat(v).toFixed(2));
+  sr('killstatic',state.killStatic, 'v-killstatic',v => parseFloat(v).toFixed(2));
+  sr('fill',      state.fill,       'v-fill',      v => v + '%');
+  sr('density',   state.density,    'v-density',   v => parseFloat(v).toFixed(0));
+  sr('cellw',     state.cellW,      'v-cellw',     v => parseFloat(v).toFixed(2));
+  sr('cellh',     state.cellH,      'v-cellh',     v => parseFloat(v).toFixed(2));
+  sr('round',     state.round,      'v-round',     v => parseFloat(v).toFixed(2));
+  sr('rot',       state.rot,        'v-rot',       v => parseFloat(v).toFixed(0) + '°');
+  sr('spacing',   state.spacing,    'v-spacing',   v => parseFloat(v).toFixed(2));
+  sr('low',       state.low,        'v-low',       v => parseFloat(v).toFixed(2));
+  sr('mid',       state.mid,        'v-mid',       v => parseFloat(v).toFixed(2));
+  sr('high',      state.high,       'v-high',      v => parseFloat(v).toFixed(2));
+  sr('brushsize', state.brushSize,  'v-brushsize', v => v);
+
+  // Toggles
+  document.getElementById('toggle-wrap')?.classList.toggle('on', state.wrap);
+  document.getElementById('toggle-running')?.classList.toggle('on', state.running);
+  document.getElementById('toggle-paint')?.classList.toggle('on', state.paintMode);
+  document.getElementById('toggle-size-brt')?.classList.toggle('on', state.sizeFromBrt);
+  document.body.classList.toggle('painting', state.paintMode);
+
+  // Segmented: mode
+  const modeMap = {0:'dots',1:'cols',2:'rows'};
+  const modeSeg = document.querySelector('.seg[data-control="mode"]');
+  modeSeg?.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === modeMap[state.mode]));
+
+  // Segmented: colormode
+  const cmMap = {0:'solid',1:'gradient',2:'palrandom',3:'palluma',4:'palpick'};
+  const cmSeg = document.querySelector('.seg[data-control="colormode"]');
+  cmSeg?.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === cmMap[state.colorMode]));
+  document.getElementById('solid-controls').style.display        = state.colorMode === 0 ? '' : 'none';
+  document.getElementById('gradient-controls').style.display     = state.colorMode === 1 ? '' : 'none';
+  document.getElementById('palette-pick-controls').style.display = state.colorMode === 4 ? '' : 'none';
+
+  // Palette pick
+  document.querySelector('.pal-swatches[data-control="palPick"]')
+    ?.querySelectorAll('.pal-btn')
+    .forEach(b => b.classList.toggle('active', parseInt(b.dataset.val) === state.palPick));
+
+  // Color inputs
+  document.getElementById('solid-color').value = rgbToHex(state.solid);
+  document.getElementById('grad-low').value    = rgbToHex(state.gLow);
+  document.getElementById('grad-mid').value    = rgbToHex(state.gMid);
+  document.getElementById('grad-high').value   = rgbToHex(state.gHigh);
+  document.getElementById('bg-color').value    = rgbToHex(state.bg);
+}
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+function hexToRgb(hex) {
+  const m = hex.replace('#', '');
+  return [parseInt(m.slice(0,2),16)/255, parseInt(m.slice(2,4),16)/255, parseInt(m.slice(4,6),16)/255];
+}
+
+function bindSlider(id, key, fmt, valKey) {
+  const el  = document.getElementById(id);
+  const val = document.getElementById('v-' + (valKey || id));
+  const apply = () => {
+    state[key] = parseFloat(el.value);
+    if (val) val.textContent = fmt(state[key]);
+    syncUniforms();
+  };
+  el.addEventListener('input', apply);
+  apply();
+}
+
+function bindSeg(name, key, parse) {
+  const wrap = document.querySelector(`.seg[data-control="${name}"]`);
+  if (!wrap) return;
+  wrap.addEventListener('click', e => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    wrap.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state[key] = parse(btn.dataset.val);
+    if (key === 'colorMode') {
+      document.getElementById('solid-controls').style.display        = state.colorMode === 0 ? '' : 'none';
+      document.getElementById('gradient-controls').style.display     = state.colorMode === 1 ? '' : 'none';
+      document.getElementById('palette-pick-controls').style.display = state.colorMode === 4 ? '' : 'none';
+    }
+    syncUniforms();
+  });
+}
+
+function bindColor(id, key) {
+  const el = document.getElementById(id);
+  const apply = () => { state[key] = hexToRgb(el.value); syncUniforms(); };
+  el.addEventListener('input', apply);
+  apply();
+}
+
+// ============================================================
+// BIND ALL CONTROLS
+// ============================================================
+
+// GoL sliders (simulation-only, no syncUniforms)
+let rebuildTimer = null;
+document.getElementById('simres').addEventListener('input', function() {
+  state.simRes = parseInt(this.value);
+  document.getElementById('v-simres').textContent = state.simRes;
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(rebuildSim, 400);
+});
+
+document.getElementById('speed').addEventListener('input', function() {
+  state.speed = parseFloat(this.value);
+  document.getElementById('v-speed').textContent = state.speed < 1 ? state.speed.toFixed(2) : state.speed.toFixed(0);
+});
+document.getElementById('trail').addEventListener('input', function() {
+  state.trail = parseFloat(this.value);
+  document.getElementById('v-trail').textContent = state.trail.toFixed(2);
+});
+document.getElementById('killstatic').addEventListener('input', function() {
+  state.killStatic = parseFloat(this.value);
+  document.getElementById('v-killstatic').textContent = state.killStatic.toFixed(2);
+});
+document.getElementById('fill').addEventListener('input', function() {
+  state.fill = parseInt(this.value);
+  document.getElementById('v-fill').textContent = state.fill + '%';
+});
+document.getElementById('brushsize').addEventListener('input', function() {
+  state.brushSize = parseInt(this.value);
+  document.getElementById('v-brushsize').textContent = state.brushSize;
+});
+
+// Action buttons
+document.getElementById('btn-randomize').addEventListener('click', () => doSeed(false));
+document.getElementById('btn-clear').addEventListener('click', () => doSeed(true));
+
+// Pattern dropdown — auto-stamp on selection
+document.getElementById('pattern-select').addEventListener('change', function() {
+  if (!this.value) return;
+  doStamp(this.value);
+  // Reset so same pattern can be stamped again
+  setTimeout(() => { this.value = ''; }, 100);
+});
+
+// Toggles
+(function() {
+  const pairs = [
+    ['toggle-wrap',     'wrap'],
+    ['toggle-running',  'running'],
+  ];
+  pairs.forEach(([id, key]) => {
+    const btn = document.getElementById(id);
+    btn.addEventListener('click', () => {
+      state[key] = !state[key];
+      btn.classList.toggle('on', state[key]);
+    });
+  });
+})();
+
+document.getElementById('toggle-paint').addEventListener('click', function() {
+  state.paintMode = !state.paintMode;
+  this.classList.toggle('on', state.paintMode);
+  document.body.classList.toggle('painting', state.paintMode);
+  if (!state.paintMode) mouseDown = false;
+});
+
+document.getElementById('toggle-size-brt').addEventListener('click', function() {
+  state.sizeFromBrt = !state.sizeFromBrt;
+  this.classList.toggle('on', state.sizeFromBrt);
+  syncUniforms();
+});
+
+// Halftone sliders
+bindSlider('density', 'density', v => v.toFixed(0), 'density');
+bindSlider('cellw',   'cellW',   v => v.toFixed(2), 'cellw');
+bindSlider('cellh',   'cellH',   v => v.toFixed(2), 'cellh');
+bindSlider('round',   'round',   v => v.toFixed(2), 'round');
+bindSlider('rot',     'rot',     v => v.toFixed(0) + '°', 'rot');
+bindSlider('spacing', 'spacing', v => v.toFixed(2), 'spacing');
+bindSlider('low',     'low',     v => v.toFixed(2), 'low');
+bindSlider('mid',     'mid',     v => v.toFixed(2), 'mid');
+bindSlider('high',    'high',    v => v.toFixed(2), 'high');
+
+// Segmented
+bindSeg('mode',      'mode',      v => ({dots:0,cols:1,rows:2}[v]));
+bindSeg('colormode', 'colorMode', v => ({solid:0,gradient:1,palrandom:2,palluma:3,palpick:4}[v]));
+
+// Colors
+bindColor('solid-color', 'solid');
+bindColor('grad-low',    'gLow');
+bindColor('grad-mid',    'gMid');
+bindColor('grad-high',   'gHigh');
+bindColor('bg-color',    'bg');
+
+// Palette picker
+document.querySelector('.pal-swatches[data-control="palPick"]')
+  ?.addEventListener('click', e => {
+    const btn = e.target.closest('.pal-btn'); if (!btn) return;
+    document.querySelectorAll('.pal-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.palPick = parseInt(btn.dataset.val);
+    syncUniforms();
+  });
+
+syncUniforms();
+</script>
+</body>
+</html>
