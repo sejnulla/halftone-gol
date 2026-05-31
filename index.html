@@ -361,7 +361,12 @@
     <select id="preset-select"><option value="">— select preset —</option></select>
     <button class="action-btn" id="btn-del-preset">Del</button>
   </div>
-  <button class="action-btn" style="width:100%;margin-bottom:10px;" id="btn-reset-preset">Reset to defaults</button>
+  <button class="action-btn" style="width:100%;margin-bottom:8px;" id="btn-reset-preset">Reset to defaults</button>
+
+  <div class="ctrl">
+    <label>Tween</label><span class="val" id="v-tweenduration">1.2s</span>
+    <input type="range" id="tweenduration" min="0" max="5" step="0.1" value="1.2">
+  </div>
 
   <!-- GAME OF LIFE -->
   <h2>Game of Life <span class="badge">simulation</span></h2>
@@ -449,6 +454,7 @@
 
   <!-- GRID -->
   <h2>Grid <span class="badge">structure</span></h2>
+  <button class="action-btn" style="width:100%;margin-bottom:10px;" id="btn-random-grid">Randomize grid &amp; color</button>
 
   <div class="ctrl">
     <label>Mode</label>
@@ -651,19 +657,20 @@ const PATTERNS = {
 // STATE
 // ============================================================
 const DEFAULTS = {
-  simRes: 200, speed: 1, trail: 0, fill: 35, killStatic: 0,
-  wrap: true, running: true, paintMode: false, brushSize: 3,
-  mode: 0, density: 37, cellW: 0.8, cellH: 0.3, round: 1.0,
+  simRes: 50, speed: 1, trail: 0.94, fill: 20, killStatic: 0.47,
+  wrap: true, running: true, paintMode: true, brushSize: 3,
+  mode: 1, density: 50, cellW: 1.71, cellH: 1.7, round: 0.44,
   rot: 0, spacing: 0.08,
-  low: 0.01, mid: 0.49, high: 1.0,
-  colorMode: 4,
-  solid:  [0.66, 1.0, 0.04],
-  gLow:   [0.10, 0.20, 0.0],
-  gMid:   [0.53, 0.85, 0.0],
-  gHigh:  [0.93, 1.0, 0.73],
-  bg:     [0.0, 0.0, 0.0],
-  palPick: 1,
-  sizeFromBrt: false,
+  low: 0, mid: 0.42, high: 1.0,
+  colorMode: 2,
+  solid:  [0.659, 1.0, 0.039],
+  gLow:   [0.102, 0.2, 0.0],
+  gMid:   [0.525, 0.851, 0.0],
+  gHigh:  [0.933, 1.0, 0.729],
+  bg:     [0.957, 0.941, 0.918],
+  palPick: 2,
+  sizeFromBrt: true,
+  tweenDuration: 1.2,
 };
 const state = JSON.parse(JSON.stringify(DEFAULTS));
 
@@ -1142,8 +1149,61 @@ function syncUniforms() {
 const PRESET_KEYS = [
   'simRes','speed','trail','fill','killStatic','wrap','brushSize',
   'mode','density','cellW','cellH','round','rot','spacing',
-  'low','mid','high','colorMode','solid','gLow','gMid','gHigh','bg','palPick','sizeFromBrt',
+  'low','mid','high','colorMode','solid','gLow','gMid','gHigh','bg','palPick','sizeFromBrt','paintMode',
+  'tweenDuration',
 ];
+
+// Keys that lerp; everything else snaps at end of tween
+const TWEEN_NUMERIC = ['speed','trail','fill','killStatic','density','cellW','cellH','round','rot','spacing','low','mid','high'];
+const TWEEN_VEC3    = ['solid','gLow','gMid','gHigh','bg'];
+const TWEEN_SNAP    = ['simRes','mode','colorMode','palPick','wrap','running','sizeFromBrt','paintMode','brushSize'];
+
+let tweenAnim = null;
+
+function tweenTo(target, onDone) {
+  const dur = state.tweenDuration * 1000;
+  if (dur < 50) { applyPreset(target); if (onDone) onDone(); return; }
+
+  const from = {};
+  TWEEN_NUMERIC.forEach(k => from[k] = state[k]);
+  TWEEN_VEC3.forEach(k => from[k] = [...state[k]]);
+
+  if (tweenAnim) cancelAnimationFrame(tweenAnim.raf);
+
+  const startTime = performance.now();
+  const snap = {};
+  TWEEN_SNAP.forEach(k => { if (target[k] !== undefined) snap[k] = target[k]; });
+
+  function ease(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+
+  function tick() {
+    const raw = Math.min((performance.now() - startTime) / dur, 1);
+    const t = ease(raw);
+
+    TWEEN_NUMERIC.forEach(k => {
+      if (target[k] !== undefined) state[k] = from[k] + (target[k] - from[k]) * t;
+    });
+    TWEEN_VEC3.forEach(k => {
+      if (target[k]) state[k] = from[k].map((v, i) => v + (target[k][i] - v) * t);
+    });
+
+    if (raw >= 1) {
+      Object.assign(state, snap);
+      const needRebuild = snap.simRes !== undefined;
+      applyStateToUI();
+      syncUniforms();
+      if (needRebuild) rebuildSim();
+      tweenAnim = null;
+      if (onDone) onDone();
+      return;
+    }
+
+    applyStateToUI();
+    syncUniforms();
+    tweenAnim = { raf: requestAnimationFrame(tick) };
+  }
+  tweenAnim = { raf: requestAnimationFrame(tick) };
+}
 
 function loadPresetList() {
   const presets = JSON.parse(localStorage.getItem('halftone-gol-presets') || '{}');
@@ -1162,14 +1222,34 @@ function applyPreset(settings) {
   PRESET_KEYS.forEach(k => {
     if (settings[k] !== undefined) state[k] = JSON.parse(JSON.stringify(settings[k]));
   });
+  const needRebuild = settings.simRes !== undefined && settings.simRes !== state.simRes;
   applyStateToUI();
   syncUniforms();
+  if (needRebuild) rebuildSim();
+}
+
+function randomizeGridColor() {
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const rndInt = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
+  const rndColor = () => [Math.random(), Math.random(), Math.random()];
+
+  const target = {
+    mode:      rndInt(0, 2),
+    density:   rndInt(20, 180),
+    cellW:     parseFloat(rnd(0.3, 2.5).toFixed(2)),
+    cellH:     parseFloat(rnd(0.3, 2.5).toFixed(2)),
+    round:     parseFloat(rnd(0, 1).toFixed(2)),
+    rot:       rndInt(-45, 45),
+    spacing:   parseFloat(rnd(0, 0.5).toFixed(2)),
+    palPick:   rndInt(0, 3),
+  };
+  tweenTo(target);
 }
 
 document.getElementById('preset-select').addEventListener('change', function() {
   if (!this.value) return;
   const presets = JSON.parse(localStorage.getItem('halftone-gol-presets') || '{}');
-  if (presets[this.value]) applyPreset(presets[this.value]);
+  if (presets[this.value]) tweenTo(presets[this.value]);
 });
 
 document.getElementById('btn-save-preset').addEventListener('click', () => {
@@ -1202,13 +1282,13 @@ document.getElementById('btn-del-preset').addEventListener('click', () => {
 });
 
 document.getElementById('btn-reset-preset').addEventListener('click', () => {
-  applyPreset(DEFAULTS);
+  tweenTo(DEFAULTS);
 });
 
 // ============================================================
 // BUNDLED PRESETS — seeded into localStorage on first visit
 // ============================================================
-const BUNDLED_PRESETS = {"1":{"simRes":50,"speed":1,"trail":0.56,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":96,"cellW":1.71,"cellH":1.7,"round":0,"rot":0,"spacing":0.08,"low":0.01,"mid":0.49,"high":1,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":1,"sizeFromBrt":false},"2":{"simRes":50,"speed":1,"trail":0.56,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":96,"cellW":1.71,"cellH":1.7,"round":0,"rot":0,"spacing":0.08,"low":0,"mid":0.11,"high":0.5,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":0,"sizeFromBrt":false},"3":{"simRes":50,"speed":1,"trail":0.56,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":21,"cellW":1.71,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":2,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":false},"4":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":50,"cellW":1.71,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":2,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":true},"5":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":50,"cellW":1.71,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":2,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":true},"6":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":106,"cellW":0.3,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":true},"7":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":55,"cellW":2.28,"cellH":2.5,"round":0.76,"rot":45,"spacing":0,"low":0,"mid":0.42,"high":1,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":0,"sizeFromBrt":true},"8":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":22,"cellW":1.87,"cellH":0.3,"round":0,"rot":0,"spacing":0.09,"low":0,"mid":0.42,"high":1,"colorMode":3,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":0,"sizeFromBrt":false}};
+const BUNDLED_PRESETS = {"1":{"simRes":50,"speed":1,"trail":0.56,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":96,"cellW":1.71,"cellH":1.7,"round":0,"rot":0,"spacing":0.08,"low":0.01,"mid":0.49,"high":1,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":1,"sizeFromBrt":false,"paintMode":true},"2":{"simRes":50,"speed":1,"trail":0.56,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":96,"cellW":1.71,"cellH":1.7,"round":0,"rot":0,"spacing":0.08,"low":0,"mid":0.11,"high":0.5,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":0,"sizeFromBrt":false,"paintMode":true},"3":{"simRes":50,"speed":1,"trail":0.56,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":21,"cellW":1.71,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":2,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":false,"paintMode":true},"4":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":0,"density":50,"cellW":1.71,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":2,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":true,"paintMode":true},"5":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":50,"cellW":1.71,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":2,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":true,"paintMode":true},"6":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":106,"cellW":0.3,"cellH":1.7,"round":0.44,"rot":0,"spacing":0.08,"low":0,"mid":0.42,"high":1,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":2,"sizeFromBrt":true,"paintMode":true},"7":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":55,"cellW":2.28,"cellH":2.5,"round":0.76,"rot":45,"spacing":0,"low":0,"mid":0.42,"high":1,"colorMode":4,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":0,"sizeFromBrt":true,"paintMode":true},"8":{"simRes":50,"speed":1,"trail":0.94,"fill":20,"killStatic":0.47,"wrap":true,"brushSize":3,"mode":1,"density":22,"cellW":1.87,"cellH":0.3,"round":0,"rot":0,"spacing":0.09,"low":0,"mid":0.42,"high":1,"colorMode":3,"solid":[0.6588235294117647,1,0.0392156862745098],"gLow":[0.10196078431372549,0.2,0],"gMid":[0.5254901960784314,0.8509803921568627,0],"gHigh":[0.9333333333333333,1,0.7294117647058823],"bg":[0.9568627450980393,0.9411764705882353,0.9176470588235294],"palPick":0,"sizeFromBrt":false,"paintMode":true}};
 
 // Seed localStorage with bundled presets if the user has none yet
 if (!localStorage.getItem('halftone-gol-presets')) {
@@ -1243,7 +1323,8 @@ function applyStateToUI() {
   sr('low',       state.low,        'v-low',       v => parseFloat(v).toFixed(2));
   sr('mid',       state.mid,        'v-mid',       v => parseFloat(v).toFixed(2));
   sr('high',      state.high,       'v-high',      v => parseFloat(v).toFixed(2));
-  sr('brushsize', state.brushSize,  'v-brushsize', v => v);
+  sr('brushsize',      state.brushSize,     'v-brushsize',     v => v);
+  sr('tweenduration',  state.tweenDuration, 'v-tweenduration', v => parseFloat(v).toFixed(1) + 's');
 
   // Toggles
   document.getElementById('toggle-wrap')?.classList.toggle('on', state.wrap);
@@ -1395,6 +1476,15 @@ document.getElementById('toggle-size-brt').addEventListener('click', function() 
   this.classList.toggle('on', state.sizeFromBrt);
   syncUniforms();
 });
+
+// Tween duration slider
+document.getElementById('tweenduration').addEventListener('input', function() {
+  state.tweenDuration = parseFloat(this.value);
+  document.getElementById('v-tweenduration').textContent = state.tweenDuration.toFixed(1) + 's';
+});
+
+// Random grid & color
+document.getElementById('btn-random-grid').addEventListener('click', randomizeGridColor);
 
 // Halftone sliders
 bindSlider('density', 'density', v => v.toFixed(0), 'density');
